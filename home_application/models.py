@@ -29,3 +29,19 @@ class BackupRecord(models.Model):
 
     def __str__(self):
         return "{}-{}".format(self.bk_host_id, self.bk_backup_name)
+
+
+class ApiRequestCount(models.Model):
+    """API request count for BKVision dashboards."""
+
+    api_category = models.CharField(verbose_name="API category", max_length=255)
+    api_name = models.CharField(verbose_name="API name", max_length=255)
+    request_count = models.IntegerField(verbose_name="request count", default=0)
+
+    class Meta:
+        unique_together = ("api_category", "api_name")
+        verbose_name = "API request count"
+        verbose_name_plural = "API request counts"
+
+    def __str__(self):
+        return "{}-{}".format(self.api_category, self.api_name)

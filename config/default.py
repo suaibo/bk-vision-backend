@@ -68,7 +68,9 @@ INSTALLED_APPS += (  # noqa
 # 跨域中间件
 MIDDLEWARE = ("corsheaders.middleware.CorsMiddleware",) + MIDDLEWARE
 # 自定义中间件
-MIDDLEWARE += ()  # noqa
+MIDDLEWARE += (  # noqa
+    "core.middleware.RecordUserBehaviorMiddleware",
+)
 
 # # TODO：在文档中需要处理CORS与CSRF问题，待跟进README
 CORS_ALLOW_ALL_ORIGINS = True
