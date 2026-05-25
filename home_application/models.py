@@ -45,3 +45,21 @@ class ApiRequestCount(models.Model):
 
     def __str__(self):
         return "{}-{}".format(self.api_category, self.api_name)
+
+
+class ApiAccessLog(models.Model):
+    """Per-request behavior log for BKVision and audit analysis."""
+
+    api_category = models.CharField(verbose_name="API category", max_length=255)
+    api_name = models.CharField(verbose_name="API name", max_length=255)
+    request_path = models.CharField(verbose_name="request path", max_length=1024)
+    request_method = models.CharField(verbose_name="request method", max_length=16)
+    username = models.CharField(verbose_name="username", max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(verbose_name="created at", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "API access log"
+        verbose_name_plural = "API access logs"
+
+    def __str__(self):
+        return "{}-{}-{}".format(self.api_category, self.api_name, self.username)

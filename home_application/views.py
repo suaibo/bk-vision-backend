@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 import json
+import logging
 import os
 import time
+from functools import wraps
 
 from django.conf import settings
+from django.db.models import Count
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
@@ -24,7 +27,27 @@ from home_application.constants import (
 from home_application.models import BackupRecord, BizInfo
 
 
+logger = logging.getLogger(__name__)
 api_login_exempt = login_exempt if settings.DEBUG else lambda func: func
+
+
+def api_exception_guard(func):
+    """Return JSON errors for API exceptions and keep useful server logs."""
+
+    @wraps(func)
+    def wrapper(request, *args, **kwargs):
+        try:
+            return func(request, *args, **kwargs)
+        except Exception as err:  # pylint: disable=broad-except
+            logger.exception("Unexpected exception in %s", func.__name__)
+            return JsonResponse({
+                "result": False,
+                "code": 500,
+                "message": str(err),
+                "data": None,
+            }, status=500)
+
+    return wrapper
 
 
 def home(request):
@@ -237,6 +260,7 @@ def _normalize_backup_rows(log_data, bk_host_id, search_path, suffix, backup_pat
 
 
 @api_login_exempt
+@api_exception_guard
 def get_bizs_list(request):
     """Fetch the business list from local cache first, then CMDB."""
     bizs = BizInfo.objects.all().order_by("bk_biz_id")
@@ -270,6 +294,7 @@ def get_bizs_list(request):
 
 
 @api_login_exempt
+@api_exception_guard
 def get_sets_list(request):
     """Fetch set list by business id."""
     bk_biz_id = _param_as_int(request, "bk_biz_id")
@@ -291,6 +316,7 @@ def get_sets_list(request):
 
 
 @api_login_exempt
+@api_exception_guard
 def get_modules_list(request):
     """Fetch module list by business id and set id."""
     bk_biz_id = _param_as_int(request, "bk_biz_id")
@@ -317,6 +343,7 @@ def get_modules_list(request):
 
 
 @api_login_exempt
+@api_exception_guard
 def get_hosts_list(request):
     """Fetch host list by business id and optional set/module/operator filters."""
     bk_biz_id = _param_as_int(request, "bk_biz_id")
@@ -362,6 +389,7 @@ def get_hosts_list(request):
 
 
 @api_login_exempt
+@api_exception_guard
 def get_host_detail(request):
     """Fetch host detail by host id."""
     bk_host_id = _param_as_int(request, "bk_host_id")
@@ -374,6 +402,7 @@ def get_host_detail(request):
 
 
 @api_login_exempt
+@api_exception_guard
 def search_file(request):
     """Search files on selected hosts through a JOB execution plan."""
     host_id_list, error_response = _parse_host_id_list(request)
@@ -419,6 +448,7 @@ def search_file(request):
 
 
 @api_login_exempt
+@api_exception_guard
 def backup_file(request):
     """Backup matched files on selected hosts through a JOB execution plan."""
     host_id_list, error_response = _parse_host_id_list(request)
@@ -485,9 +515,53 @@ def backup_file(request):
 
 
 @api_login_exempt
+@api_exception_guard
 def get_backup_record(request):
-    """Return backup records ordered by latest first."""
-    return _json_response(
-        True,
-        list(BackupRecord.objects.all().order_by("-id").values()),
-    )
+    """Return backup records ordered by latest first, with optional filters."""
+    records = BackupRecord.objects.all()
+
+    bk_host_id = _param_as_int(request, "bk_host_id")
+    if bk_host_id is not None:
+        records = records.filter(bk_host_id=bk_host_id)
+
+    operator = request.GET.get("operator")
+    if operator:
+        records = records.filter(bk_file_operator__icontains=operator)
+
+    suffix = request.GET.get("suffix")
+    if suffix:
+        records = records.filter(bk_file_suffix__icontains=suffix)
+
+    keyword = request.GET.get("keyword")
+    if keyword:
+        records = records.filter(bk_backup_name__icontains=keyword)
+
+    limit = _param_as_int(request, "limit")
+    ordered_records = records.order_by("-id")
+    if limit:
+        ordered_records = ordered_records[:limit]
+
+    record_list = list(ordered_records.values())
+    if request.GET.get("include_summary") != "1":
+        return _json_response(True, record_list)
+
+    summary = {
+        "total": records.count(),
+        "host_count": records.values("bk_host_id").distinct().count(),
+        "operator_count": records.values("bk_file_operator").distinct().count(),
+        "latest_time": record_list[0]["bk_file_create_time"] if record_list else "",
+        "by_operator": list(
+            records.values("bk_file_operator")
+            .annotate(count=Count("id"))
+            .order_by("-count")[:10]
+        ),
+        "by_suffix": list(
+            records.values("bk_file_suffix")
+            .annotate(count=Count("id"))
+            .order_by("-count")[:10]
+        ),
+    }
+    return _json_response(True, {
+        "items": record_list,
+        "summary": summary,
+    })
